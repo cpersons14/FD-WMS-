@@ -1,0 +1,2 @@
+document.getElementById('add-line')?.addEventListener('click',()=>{const row=document.querySelector('.order-line').cloneNode(true);row.querySelectorAll('input').forEach(i=>i.value='');row.querySelectorAll('select').forEach(s=>s.value='EA');document.getElementById('lines').append(row);});
+document.getElementById('lines')?.addEventListener('click',event=>{if(event.target.classList.contains('remove-line')&&document.querySelectorAll('.order-line').length>1)event.target.closest('.order-line').remove();});

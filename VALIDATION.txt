@@ -1,0 +1,33 @@
+S3PL Family Dollar WMS — upload-ready deployment copy
+Deployment copy verified November 9, 2026 (America/Chicago)
+
+Django test suite: 66 discovered; 64 passed, 2 skipped.
+Local database: SQLite. Skipped PostgreSQL-only checks: simultaneous last-unit reservations and simultaneous posting of one receipt. PostgreSQL is not available here; both remain mandatory on disposable PostgreSQL staging before launch.
+
+Coverage includes all previously tested workflow behavior plus:
+- Each/case/standard-pallet conversions, loose eaches, invalid/missing unit factors and immutable order factors after master changes.
+- Original inventory is not rescaled when eaches are verified; transfers/counts use explicit units.
+- Receipt drafts and clarification status leave stock unchanged; multiple item/location rows post atomically.
+- A later invalid/uncounted line rolls back all receipt stock movements.
+- Duplicate creation keys and repeated posting; stale draft revisions; immutable posted receipts.
+- Changed case packs require review; damaged stock requires a held bin.
+- Missing supplier/date/reference/group, future dates and empty group addresses block submission.
+- Private attachment role checks, CSRF, file type/size validation, removal and selected email attachments.
+- One grouped email per receipt; separate posting/email status; disabled sender leaves pending.
+- Failed/uncertain email attempts require review before retry; retries never repost inventory.
+- Changed/revoked group addresses block queued delivery rather than silently changing recipients.
+- Office form posting, incomplete draft preservation with documents, search/detail routes and protected document responses.
+- Synthetic opening-import test preserves unknown versus zero/count-required quantities and prevents duplicate imports. No real inventory file is packaged.
+- Initial role setup is idempotent and creates no inventory or user accounts.
+- Forward migration preserves historical picked/shipped/cancelled orders.
+
+Django system check passed (existing axes.W006 intentionally silenced).
+Migration drift check: no changes detected. All migrations applied to local scratch database.
+Static collection passed: 131 files. JavaScript syntax checks passed.
+Template/route rendering and form submissions verified through Django's test client.
+Full browser/device visual interaction remains for staging: the local Chromium executable was unavailable and its download failed. Drag/drop and preview JavaScript have not been exercised in a real browser here.
+
+Not performed: live deployment, PostgreSQL concurrent/load tests, real SMTP delivery, document malware scanning, scanner/printer hardware validation, backup restore or warehouse acceptance.
+No real emails sent. No paid services or scheduled jobs created.
+
+Do not use this pilot for live dispatch or Lawson replacement before the rollout checks in README.md are complete.
