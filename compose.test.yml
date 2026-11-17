@@ -1,0 +1,17 @@
+# Disposable local PostgreSQL. No production connection or persistent volume.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: wms_test
+      POSTGRES_PASSWORD: disposable-local-only
+      POSTGRES_DB: wms_test_local
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wms_test -d wms_test_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12

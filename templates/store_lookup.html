@@ -1,0 +1,9 @@
+<div id="store-lookup" data-search-url="{% url 'store_search' %}">
+  <label for="store-search">Find a Family Dollar store</label>
+  <input type="search" id="store-search" placeholder="Store number, ZIP, city or street address" autocomplete="off" maxlength="100" aria-describedby="store-search-status" aria-controls="store-search-results">
+  <p id="store-search-status" class="muted" role="status" aria-live="polite">Enter at least two characters, then select the correct store.</p>
+  <div id="store-search-results" aria-label="Matching stores" style="display:grid;gap:8px;margin-bottom:12px"></div>
+  <button type="button" class="secondary" id="store-manual">Enter delivery address manually</button>
+  {% if is_warehouse %}<p><a href="{% url 'directory_import' %}">Import or update store directory</a></p>{% endif %}
+  <noscript><p>Store search needs JavaScript. You can enter the delivery address in the fields below.</p></noscript>
+</div>
