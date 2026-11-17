@@ -1,0 +1,5 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-title"><div><p class="eyebrow">FAMILY DOLLAR</p><h1>Store directory</h1><p>{{ store_count }} active delivery locations available for order search.</p></div></div>
+<section class="panel"><h2>Import locations</h2><p>Upload the FD Active Location Report in Excel format. This adds new stores and updates matching store numbers. Stores absent from the report are retained. Existing orders keep the delivery details saved when ordered.</p>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button type="submit">Import location report</button></form></section>
+<p><a href="{% url 'new_order' %}">Create an order</a></p>{% endblock %}

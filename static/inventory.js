@@ -8,8 +8,10 @@ setInterval(async()=>{
   const table=page.querySelector('.panel.flush');
   if(!table)throw new Error('Inventory unavailable');
   document.querySelector('.panel.flush').replaceWith(table);
+  const totals=page.querySelector('#part-totals');
+  if(totals)document.querySelector('#part-totals').replaceWith(totals);
   const pagination=page.querySelector('.pagination');
-  if(pagination)document.querySelector('.pagination').replaceWith(pagination);
+  if(pagination&&document.querySelector('.pagination'))document.querySelector('.pagination').replaceWith(pagination);
   status.textContent='Updated '+new Date().toLocaleTimeString()+'. Updates every 30 seconds.';
  }catch(error){status.textContent='Updates paused. Refresh or sign in again to confirm availability.';}
 },30000);

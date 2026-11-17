@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('warehouse', '0001_initial'),
+        ("warehouse", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='stock',
-            name='count_required',
+            model_name="stock",
+            name="count_required",
             field=models.BooleanField(default=False),
         ),
     ]

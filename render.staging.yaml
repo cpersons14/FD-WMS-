@@ -1,0 +1,42 @@
+# Separate pilot environment. Publish reviewed source before creating this Blueprint.
+# Paid web plan is required for pre-deploy migrations; smallest paid plans selected.
+databases:
+  - name: s3pl-fd-staging-db
+    plan: 0.1c-256mb
+    region: ohio
+    postgresMajorVersion: "18"
+    databaseName: s3pl_fd_staging
+    user: s3pl_fd_staging
+    diskSizeGB: 1
+    ipAllowList: []
+services:
+  - type: web
+    name: s3pl-fd-wms-staging
+    runtime: python
+    plan: 0.5c-512mb
+    region: ohio
+    branch: main
+    buildCommand: bash build.sh
+    preDeployCommand: python manage.py migrate --noinput && python manage.py setup_wms
+    startCommand: python -m gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    healthCheckPath: /health/ready/
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: DATABASE_URL
+        fromDatabase:
+          name: s3pl-fd-staging-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "0"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: WMS_ENVIRONMENT
+        value: staging
+      - key: WMS_EMAIL_ENABLED
+        value: "0"
+      - key: WMS_RECEIPT_EMAIL_ENABLED
+        value: "0"
