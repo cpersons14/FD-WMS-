@@ -39,7 +39,7 @@ def release_detail(request, pk):
             request,
             release=release,
             allocations=release.allocations.select_related(
-                "line__part", "stock__location"
+                "line__part", "stock__location", "requisition"
             ).order_by("stock__location__code", "line__part__sku"),
         ),
     )

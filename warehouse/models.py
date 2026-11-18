@@ -216,6 +216,8 @@ class StoreLocation(models.Model):
 
 class Order(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document_number = models.CharField(max_length=32, unique=True, editable=False)
+    next_shipment_number = models.PositiveIntegerField(default=1, editable=False)
     request_key = models.UUIDField(unique=True)
     store = models.CharField(max_length=30)
     recipient = models.CharField(max_length=150)
@@ -257,6 +259,10 @@ class Order(models.Model):
 
     @property
     def number(self):
+        return self.document_number
+
+    @property
+    def legacy_number(self):
         return "FD-" + self.id.hex[:8].upper()
 
     class Meta:
@@ -329,6 +335,13 @@ class OrderLine(models.Model):
 
 
 class Allocation(models.Model):
+    requisition = models.ForeignKey(
+        "Requisition",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="allocations",
+    )
     release = models.ForeignKey(
         "PickRelease",
         on_delete=models.PROTECT,
@@ -382,10 +395,104 @@ class Shipment(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     request_key = models.UUIDField(unique=True)
     order = models.ForeignKey(Order, on_delete=models.PROTECT, related_name="shipments")
+    requisition = models.OneToOneField(
+        "Requisition", on_delete=models.PROTECT, related_name="shipment"
+    )
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
     carrier = models.CharField(max_length=100)
     tracking = models.CharField(max_length=150)
+
+    @property
+    def number(self):
+        return self.requisition.reference
+
+
+class DocumentSequence(models.Model):
+    name = models.CharField(max_length=30, primary_key=True)
+    value = models.PositiveBigIntegerField(default=0)
+
+
+class Requisition(models.Model):
+    """One numbered release within a document; at most one tracking record."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey(
+        Order, on_delete=models.PROTECT, related_name="requisitions"
+    )
+    shipment_number = models.PositiveIntegerField(editable=False)
+    reference = models.CharField(max_length=48, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["shipment_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["order", "shipment_number"], name="unique_document_shipment"
+            ),
+            models.CheckConstraint(
+                condition=Q(shipment_number__gte=1), name="positive_shipment_number"
+            ),
+        ]
+
+    @property
+    def shipment_display(self):
+        return f"{self.shipment_number:03d}"
+
+    @property
+    def status(self):
+        if hasattr(self, "shipment"):
+            return "Shipped"
+        lines = list(self.lines.all())
+        if not lines:
+            return "Cancelled" if self.order.status == "CANCELLED" else "Awaiting stock"
+        if all(row.cancelled == row.quantity for row in lines):
+            return "Cancelled"
+        if all(row.packed + row.cancelled == row.quantity for row in lines):
+            return "Packed"
+        if all(row.picked + row.cancelled == row.quantity for row in lines):
+            return "Picked"
+        return "Released for picking"
+
+
+class RequisitionLine(models.Model):
+    requisition = models.ForeignKey(
+        Requisition, on_delete=models.PROTECT, related_name="lines"
+    )
+    line = models.ForeignKey(
+        OrderLine, on_delete=models.PROTECT, related_name="requisition_lines"
+    )
+    quantity = models.DecimalField(max_digits=16, decimal_places=3)
+    picked = models.DecimalField(max_digits=16, decimal_places=3, default=0)
+    packed = models.DecimalField(max_digits=16, decimal_places=3, default=0)
+    shipped = models.DecimalField(max_digits=16, decimal_places=3, default=0)
+    cancelled = models.DecimalField(max_digits=16, decimal_places=3, default=0)
+
+    @property
+    def reserved(self):
+        return self.quantity - self.cancelled - self.picked
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["requisition", "line"], name="unique_requisition_line"
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    quantity__gt=0,
+                    picked__gte=0,
+                    packed__gte=0,
+                    shipped__gte=0,
+                    cancelled__gte=0,
+                )
+                & Q(
+                    picked__lte=F("quantity") - F("cancelled"),
+                    packed__lte=F("picked"),
+                    shipped__lte=F("packed"),
+                ),
+                name="requisition_fulfillment_bounds",
+            ),
+        ]
 
 
 class ShipmentLine(models.Model):
@@ -559,6 +666,13 @@ class PickRelease(models.Model):
     order = models.ForeignKey(
         Order, on_delete=models.PROTECT, related_name="pick_releases"
     )
+    requisition = models.ForeignKey(
+        Requisition,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="pick_releases",
+    )
     receipt = models.ForeignKey(
         InboundReceipt,
         on_delete=models.PROTECT,
@@ -573,7 +687,11 @@ class PickRelease(models.Model):
 
     @property
     def number(self):
-        return "REL-" + self.id.hex[:10].upper()
+        return (
+            self.requisition.reference
+            if self.requisition_id
+            else "REL-" + self.id.hex[:10].upper()
+        )
 
     class Meta:
         ordering = ["-created_at"]

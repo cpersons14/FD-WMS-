@@ -15,8 +15,15 @@ from .models import (
     ShipmentLine,
     ReturnReceipt,
     OperationKey,
+    RequisitionLine,
 )
 from .services import WorkflowError, warehouse_user
+from .requisitions import (
+    attach_allocations,
+    select_requisition,
+    release_line,
+    carry_remainder,
+)
 
 
 def require_warehouse(actor):
@@ -69,6 +76,7 @@ def fulfill(
     key=None,
     note="",
     unit="BASE",
+    requisition_id=None,
 ):
     require_warehouse(actor)
     order = Order.objects.select_for_update().get(pk=order_id)
@@ -84,6 +92,7 @@ def fulfill(
         tracking=tracking,
         note=note,
         unit=unit,
+        requisition=requisition_id,
     ):
         return order
     if order.status in ("SHIPPED", "CANCELLED"):
@@ -93,38 +102,46 @@ def fulfill(
         .filter(pk__in=order.lines.values("part_id"))
         .order_by("pk")
     )
+    requisition = None
+    if action in {"pick", "pack", "ship", "unpick", "unpack"}:
+        requisition = select_requisition(order, requisition_id)
     if action == "allocate":
         from .services import reserve_line
 
+        allocations = []
         for line in order.lines.select_related("part").order_by("part_id"):
-            reserve_line(actor, line, strict=False)
+            allocations.extend(reserve_line(actor, line, strict=False))
+        attach_allocations(order, allocations)
     elif action == "pick":
-        lines = order.lines.filter(pk=line_id) if line_id else order.lines.all()
+        lines = order.lines.filter(requisition_lines__requisition=requisition)
+        if line_id:
+            lines = lines.filter(pk=line_id)
         if not lines.exists():
             raise WorkflowError("Select a valid order line.")
         did = False
         for line in lines:
             from .units import convert
 
+            row = release_line(requisition, line)
             want, entry = (
                 convert(line, amount, unit)
                 if line_id
                 else (
-                    line.reserved_quantity,
+                    row.reserved,
                     {
-                        "base_quantity": str(line.reserved_quantity),
+                        "base_quantity": str(row.reserved),
                         "base_unit": line.base_unit or "UNVERIFIED",
                     },
                 )
             )
             if not want:
                 continue
-            if want > line.reserved_quantity:
+            if want > row.reserved:
                 raise WorkflowError(
                     "Pick exceeds reserved quantity. Allocate stock first."
                 )
             allocations = list(
-                line.allocations.filter(state="RESERVED")
+                line.allocations.filter(state="RESERVED", requisition=requisition)
                 .select_related("stock")
                 .order_by("stock_id", "pk")
             )
@@ -167,6 +184,7 @@ def fulfill(
                         quantity=take,
                         state="PICKED",
                         release_id=a.release_id,
+                        requisition=requisition,
                     )
                 Event.objects.create(
                     actor=actor,
@@ -176,11 +194,17 @@ def fulfill(
                     quantity=-take,
                     before=before,
                     after=stock.on_hand,
-                    entry={**entry, "bin_quantity": str(take)},
+                    entry={
+                        **entry,
+                        "bin_quantity": str(take),
+                        "requisition": requisition.reference,
+                    },
                 )
                 remaining -= take
             line.picked += want
             line.save(update_fields=["picked"])
+            row.picked += want
+            row.save(update_fields=["picked"])
             did = True
         if not did:
             raise WorkflowError("No reserved quantity remains to pick.")
@@ -194,38 +218,49 @@ def fulfill(
         from .units import convert
 
         qty, entry = convert(line, amount, unit)
-        if qty > line.picked - line.packed:
+        row = release_line(requisition, line)
+        if qty > row.picked - row.packed:
             raise WorkflowError("Pack quantity exceeds picked, unpacked stock.")
         line.packed += qty
         line.save(update_fields=["packed"])
+        row.packed += qty
+        row.save(update_fields=["packed"])
         Event.objects.create(
             actor=actor,
             order=order,
             action="PACK_VERIFIED",
             quantity=qty,
             note=line.part.sku,
-            entry=entry,
+            entry={**entry, "requisition": requisition.reference},
         )
     elif action == "ship":
         if not carrier.strip() or not tracking.strip():
             raise WorkflowError("Enter carrier and tracking / PRO number.")
         if len(carrier.strip()) > 100 or len(tracking.strip()) > 150:
             raise WorkflowError("Carrier or tracking reference is too long.")
-        lines = [line for line in order.lines.all() if line.packed > line.shipped]
-        if not lines:
+        rows = [
+            row
+            for row in requisition.lines.select_related("line")
+            if row.packed > row.shipped
+        ]
+        if not rows:
             raise WorkflowError("Verify packing before shipping.")
+        carry_remainder(order, requisition, actor)
         shipment = Shipment.objects.create(
             order=order,
+            requisition=requisition,
             actor=actor,
             request_key=key or uuid.uuid4(),
             carrier=carrier.strip(),
             tracking=tracking.strip(),
         )
-        for line in lines:
-            qty = line.packed - line.shipped
+        for row in rows:
+            line = row.line
+            qty = row.packed - row.shipped
             ShipmentLine.objects.create(shipment=shipment, line=line, quantity=qty)
             line.shipped += qty
             line.save(update_fields=["shipped"])
+            RequisitionLine.objects.filter(pk=row.pk).update(shipped=row.packed)
         order.carrier = shipment.carrier
         order.tracking = shipment.tracking
         order.shipped_at = shipment.created_at
@@ -234,7 +269,8 @@ def fulfill(
             actor=actor,
             order=order,
             action="ORDER_SHIPPED",
-            note=f"{carrier}: {tracking}; shipment {shipment.pk}",
+            note=f"{requisition.reference}; {carrier}: {tracking}",
+            entry={"requisition": requisition.reference},
         )
     elif action in ("unpack", "unpick"):
         if not note.strip():
@@ -246,18 +282,23 @@ def fulfill(
         from .units import convert
 
         qty, entry = convert(line, amount, unit)
+        row = release_line(requisition, line)
         if action == "unpack":
-            if qty > line.packed - line.shipped:
+            if qty > row.packed - row.shipped:
                 raise WorkflowError("Only unshipped packed stock can be unpacked.")
             line.packed -= qty
             line.save(update_fields=["packed"])
+            row.packed -= qty
+            row.save(update_fields=["packed"])
         else:
-            if qty > line.picked - line.packed:
+            if qty > row.picked - row.packed:
                 raise WorkflowError(
                     "Unpack first. Only unpacked, picked stock can be returned to its bin."
                 )
             remaining = qty
-            for a in line.allocations.filter(state="PICKED").order_by("-pk"):
+            for a in line.allocations.filter(
+                state="PICKED", requisition=requisition
+            ).order_by("-pk"):
                 take = min(a.quantity, remaining)
                 if not take:
                     break
@@ -277,7 +318,11 @@ def fulfill(
                     a.quantity -= take
                     a.save(update_fields=["quantity"])
                     Allocation.objects.create(
-                        line=line, stock=stock, quantity=take, release_id=a.release_id
+                        line=line,
+                        stock=stock,
+                        quantity=take,
+                        release_id=a.release_id,
+                        requisition=requisition,
                     )
                 Event.objects.create(
                     actor=actor,
@@ -294,13 +339,15 @@ def fulfill(
                 raise WorkflowError("Pick history is incomplete. Correction cancelled.")
             line.picked -= qty
             line.save(update_fields=["picked"])
+            row.picked -= qty
+            row.save(update_fields=["picked"])
         Event.objects.create(
             actor=actor,
             order=order,
             action=action.upper() + "_CONFIRMED",
             quantity=qty,
             note=note,
-            entry=entry,
+            entry={**entry, "requisition": requisition.reference},
         )
     elif action in ("cancel", "cancel_remaining"):
         if action == "cancel_remaining" and not note.strip():
@@ -329,6 +376,9 @@ def fulfill(
         for line in order.lines.all():
             line.cancelled = line.quantity - line.picked
             line.save(update_fields=["cancelled"])
+        for row in RequisitionLine.objects.filter(requisition__order=order):
+            row.cancelled = row.quantity - row.picked
+            row.save(update_fields=["cancelled"])
         Event.objects.create(
             actor=actor, order=order, action="CANCEL_UNPICKED", note=note
         )
