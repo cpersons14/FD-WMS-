@@ -32,6 +32,9 @@ def release_waiting(actor, orders, part_ids, receipt=None, reason="Stock release
             allocations.extend(reserve_line(actor, line) or [])
         if not allocations:
             continue
+        from .requisitions import attach_allocations
+
+        requisition = attach_allocations(order, allocations)
         snapshot = [
             dict(
                 sku=a.line.part.sku,
@@ -41,7 +44,12 @@ def release_waiting(actor, orders, part_ids, receipt=None, reason="Stock release
             for a in allocations
         ]
         release = PickRelease.objects.create(
-            order=order, receipt=receipt, actor=actor, reason=reason, snapshot=snapshot
+            order=order,
+            receipt=receipt,
+            actor=actor,
+            reason=reason,
+            snapshot=snapshot,
+            requisition=requisition,
         )
         for allocation in allocations:
             allocation.release = release

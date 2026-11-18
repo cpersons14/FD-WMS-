@@ -1,10 +1,13 @@
 import uuid
+import re
+from urllib.parse import urlencode
 from functools import wraps
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q, Sum, Count
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 from .models import Part, Stock, Order, Event
 from .forms import OrderForm, StockForm, TransferForm
@@ -131,11 +134,16 @@ def orders(request):
     q = request.GET.get("q", "").strip()
     status = request.GET.get("status", "")
     if q:
+        match = Q(store__icontains=q)
+        if re.fullmatch(r"FD-[0-9A-Fa-f]{8}", q, re.IGNORECASE):
+            match |= Q(id__istartswith=q[3:])
         qs = qs.filter(
-            Q(store__icontains=q)
+            match
             | Q(reference__icontains=q)
             | Q(tracking__icontains=q)
             | Q(shipments__tracking__icontains=q)
+            | Q(document_number__icontains=q)
+            | Q(requisitions__reference__icontains=" ".join(q.split()))
         )
     qs = qs.distinct()
     if status in dict(Order._meta.get_field("status").choices):
@@ -221,6 +229,18 @@ def new_order(request):
 @access()
 def order_detail(request, pk):
     order = get_object_or_404(Order, pk=pk)
+    requisitions = list(
+        order.requisitions.select_related("shipment").prefetch_related(
+            "lines__line__part"
+        )
+    )
+    selected_id = request.GET.get("requisition", "")
+    selected = next((r for r in requisitions if str(r.pk) == selected_id), None)
+    if selected is None and requisitions:
+        selected = next(
+            (r for r in requisitions if r.status not in {"Shipped", "Cancelled"}),
+            requisitions[-1],
+        )
     return render(
         request,
         "order_detail.html",
@@ -235,7 +255,19 @@ def order_detail(request, pk):
             return_bins=Stock.objects.filter(
                 held=True, count_required=False, on_hand__isnull=False
             ).select_related("part", "location"),
-            shipments=order.shipments.all(),
+            shipments=order.shipments.select_related("requisition").order_by(
+                "created_at"
+            ),
+            requisitions=requisitions,
+            selected=selected,
+            release_lines=selected.lines.select_related("line__part")
+            if selected
+            else [],
+            release_allocations=selected.allocations.select_related(
+                "stock__location", "line__part"
+            )
+            if selected
+            else [],
         ),
     )
 
@@ -258,12 +290,16 @@ def order_action(request, pk):
             key=uuid.UUID(request.POST.get("request_key", "")),
             note=request.POST.get("note", ""),
             unit=request.POST.get("unit", "BASE"),
+            requisition_id=request.POST.get("requisition") or None,
         )
     except (WorkflowError, ValueError) as e:
         messages.error(request, str(e))
     else:
         messages.success(request, "Order updated.")
-    return redirect("order_detail", pk=pk)
+    url = reverse("order_detail", kwargs={"pk": pk})
+    if request.POST.get("requisition"):
+        url += "?" + urlencode({"requisition": request.POST["requisition"]})
+    return redirect(url)
 
 
 @access(warehouse=True)

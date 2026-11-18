@@ -1,6 +1,7 @@
 from django.contrib import admin
 from .models import StoreLocation
 from .models import Part, Location, Stock, Order, OrderLine, Allocation, Event
+from .models import DocumentSequence, Requisition, RequisitionLine
 
 admin.site.site_header = "S3PL Customer Operations"
 admin.site.site_title = "S3PL WMS"
@@ -58,6 +59,9 @@ class EventAdmin(ReadOnly):
 admin.site.register(Order, ReadOnly)
 admin.site.register(OrderLine, ReadOnly)
 admin.site.register(Allocation, ReadOnly)
+admin.site.register(DocumentSequence, ReadOnly)
+admin.site.register(Requisition, ReadOnly)
+admin.site.register(RequisitionLine, ReadOnly)
 
 admin.site.register(Part, ReadOnly)
 admin.site.register(Location, ReadOnly)

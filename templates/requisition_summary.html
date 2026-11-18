@@ -1,0 +1,12 @@
+<section class="panel">
+  <h2>Requisitions</h2>
+  <p>The WMS generates the Document and Shipment numbers. Each requisition has one tracking / PRO reference.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Document Shipment</th><th>Status</th><th>Carrier</th><th>Tracking / PRO</th><th>Pick / packing record</th></tr></thead>
+    <tbody>{% for req in requisitions %}<tr>
+      <td><a href="?requisition={{ req.pk }}">{{ req.reference }}</a></td><td>{{ req.status }}</td>
+      <td>{{ req.shipment.carrier|default:'—' }}</td><td>{{ req.shipment.tracking|default:'Awaiting dispatch' }}</td>
+      <td><a href="{% url 'packing_slip' order.pk %}?requisition={{ req.pk }}">Print {{ req.reference }}</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>

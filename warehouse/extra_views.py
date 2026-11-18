@@ -54,10 +54,10 @@ def alerts(request):
 @access(warehouse=True)
 def work_queue(request):
     rows = stock_summary()
-    from .models import PickRelease
+    from .models import Requisition
 
     releases = (
-        PickRelease.objects.filter(allocations__state="RESERVED")
+        Requisition.objects.filter(allocations__state="RESERVED", shipment__isnull=True)
         .select_related("order")
         .distinct()
     )
@@ -66,7 +66,7 @@ def work_queue(request):
         "work_queue.html",
         ctx(
             request,
-            releases=releases,
+            requisitions=releases,
             replenishment=[r for r in rows if r["replenish"] > 0],
             backorders=[r for r in rows if r["backordered"] > 0],
             counts=due_counts(),
@@ -262,6 +262,16 @@ def inventory_export(request):
 @access()
 def packing_slip(request, pk):
     order = get_object_or_404(Order, pk=pk)
+    selected = None
+    selected_id = request.GET.get("requisition")
+    if selected_id:
+        from django.core.exceptions import ValidationError
+        from django.http import Http404
+
+        try:
+            selected = get_object_or_404(order.requisitions, pk=selected_id)
+        except (ValueError, ValidationError):
+            raise Http404("Requisition not found.")
     return render(
         request,
         "packing_slip.html",
@@ -270,5 +280,14 @@ def packing_slip(request, pk):
             order=order,
             shipments=order.shipments.prefetch_related("lines__line__part"),
             lines=order.lines.select_related("part"),
+            selected=selected,
+            release_lines=selected.lines.select_related("line__part")
+            if selected
+            else [],
+            release_allocations=selected.allocations.select_related(
+                "stock__location", "line__part"
+            )
+            if selected
+            else [],
         ),
     )

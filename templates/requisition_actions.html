@@ -1,0 +1,78 @@
+<section class="panel">
+  <h2>Allocate available stock</h2>
+  <form method="post" action="{% url 'order_action' order.pk %}">
+    {% csrf_token %}<input type="hidden" name="request_key" value="{{ request_key }}">
+    <button name="action" value="allocate">Allocate available stock</button>
+    <button class="secondary" name="action" value="cancel">Cancel unpicked order</button>
+  </form>
+</section>
+{% if selected %}
+<section class="panel">
+  <h2>Work on {{ selected.reference }}</h2>
+  <form method="get"><label>Requisition<select name="requisition">
+    {% for req in requisitions %}<option value="{{ req.pk }}" {% if req.pk == selected.pk %}selected{% endif %}>{{ req.reference }} · {{ req.status }}</option>{% endfor %}
+  </select></label><button>Open requisition</button></form>
+  <p>Use <strong>{{ selected.reference }}</strong> in UPS Ref1 or Freightview PO#.</p>
+  <a href="{% url 'packing_slip' order.pk %}?requisition={{ selected.pk }}">Print this requisition</a>
+  <table><tr><th>Part</th><th>Released</th><th>Reserved</th><th>Picked</th><th>Packed</th><th>Shipped</th></tr>
+    {% for row in release_lines %}<tr><td>{{ row.line.part.sku }}</td><td>{{ row.quantity }}</td><td>{{ row.reserved }}</td><td>{{ row.picked }}</td><td>{{ row.packed }}</td><td>{{ row.shipped }}</td></tr>{% endfor %}
+  </table>
+  {% for a in release_allocations %}<p>{{ a.line.part.sku }} · {{ a.stock.location.code }} · {{ a.quantity }} · {{ a.get_state_display }}{% if a.state == 'RESERVED' and a.stock.kind == 'OVERSTOCK' %} — replenish to pick location{% endif %}</p>{% endfor %}
+</section>
+{% if selected.status != 'Shipped' and selected.status != 'Cancelled' %}
+<section class="panel">
+  <h2>Pick {{ selected.reference }}</h2>
+  <form method="post" action="{% url 'order_action' order.pk %}">{% include 'requisition_form_fields.html' %}
+    <button name="action" value="pick">Confirm all reserved stock on this requisition picked</button>
+  </form>
+  {% for row in release_lines %}{% with l=row.line %}
+  <h3>{{ l.part.sku }}</h3>
+  <form method="post" action="{% url 'order_action' order.pk %}">{% include 'requisition_form_fields.html' %}
+    <input type="hidden" name="line" value="{{ l.pk }}">
+    {% if l.base_unit == 'EA' %}{% include 'unit_select.html' %}{% else %}{% include 'unit_select.html' with legacy=True %}{% endif %}
+    <label>Quantity physically picked<input type="number" name="amount" min="0.001" step="0.001" required></label>
+    <button name="action" value="pick">Confirm partial pick</button>
+  </form>{% endwith %}{% endfor %}
+</section>
+<section class="panel">
+  <h2>Verify packing for {{ selected.reference }}</h2>
+  {% for row in release_lines %}{% with l=row.line %}
+  <form method="post" action="{% url 'order_action' order.pk %}">{% include 'requisition_form_fields.html' %}
+    <input type="hidden" name="line" value="{{ l.pk }}"><h3>{{ l.part.sku }}</h3>
+    <p>Order pack: {{ l.case_pack_snapshot|default_if_none:'not configured' }} EA / case; {{ l.pallet_cases_snapshot|default_if_none:'not configured' }} cases / pallet.</p>
+    {% if l.base_unit == 'EA' %}{% include 'unit_select.html' %}{% else %}{% include 'unit_select.html' with legacy=True %}{% endif %}
+    <div class="form-grid"><label>Scan barcode / part<input name="scan" required autocomplete="off"></label>
+      <label>Quantity packed<input name="amount" type="number" min="0.001" step="0.001" required></label></div>
+    <button name="action" value="pack">Verify packing</button>
+  </form>{% endwith %}{% endfor %}
+</section>
+<section class="panel">
+  <h2>Ship {{ selected.reference }}</h2>
+  <p>Ships verified packed quantities on this requisition. Any unshipped remainder receives a new Shipment number automatically.</p>
+  <form method="post" action="{% url 'order_action' order.pk %}">{% include 'requisition_form_fields.html' %}
+    <div class="form-grid"><label>Carrier<input name="carrier" maxlength="100" required></label>
+      <label>Tracking / PRO<input name="tracking" maxlength="150" required></label></div>
+    <button name="action" value="ship">Confirm shipment</button>
+  </form>
+</section>
+<section class="panel">
+  <h2>Corrections for {{ selected.reference }}</h2>
+  <p>Physically unpack or return stock to its original bin before recording a reversal. Shipped stock uses the returns process.</p>
+  <form method="post" action="{% url 'order_action' order.pk %}">{% include 'requisition_form_fields.html' %}
+    <label>Line<select name="line">{% for row in release_lines %}<option value="{{ row.line_id }}">{{ row.line.part.sku }}</option>{% endfor %}</select></label>
+    {% include 'unit_select.html' with legacy=True %}
+    <label>Quantity<input name="amount" type="number" min="0.001" step="0.001" required></label>
+    <label>Reason<input name="note" required maxlength="500"></label>
+    <button name="action" value="unpack">Reverse packing</button>
+    <button name="action" value="unpick">Return picked quantity to bin</button>
+  </form>
+</section>
+{% endif %}{% endif %}
+<section class="panel">
+  <h2>Cancel unpicked remainder of entire document</h2>
+  <form method="post" action="{% url 'order_action' order.pk %}">
+    {% csrf_token %}<input type="hidden" name="request_key" value="{{ request_key }}">
+    <label>Reason<input name="note" required maxlength="500"></label>
+    <button class="secondary" name="action" value="cancel_remaining">Cancel all unpicked remainder</button>
+  </form>
+</section>

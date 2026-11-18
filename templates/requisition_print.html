@@ -1,0 +1,10 @@
+<h2>Requisition {{ selected.reference }}</h2>
+<p><strong>Document: {{ order.document_number }} · Shipment: {{ selected.shipment_display }}</strong></p>
+<p>UPS Ref1 / Freightview PO#: <strong>{{ selected.reference }}</strong><br>Status: {{ selected.status }}</p>
+<table><tr><th>Part / description</th><th>Released</th><th>Reserved</th><th>Packed</th><th>Shipped</th><th>Cancelled</th></tr>
+{% for row in release_lines %}<tr><td>{{ row.line.part.sku }}<small>{{ row.line.part.description }}</small></td><td>{{ row.quantity }} {{ row.line.base_unit|default:'recorded base units' }}</td><td>{{ row.reserved }}</td><td>{{ row.packed }}</td><td>{{ row.shipped }}</td><td>{{ row.cancelled }}</td></tr>{% endfor %}</table>
+<h3>Locations for this requisition</h3>
+<p>Pick only Reserved rows. Replenish overstock to a counted pick location before confirming the pick.</p>
+<table><tr><th>Part</th><th>Location</th><th>Quantity</th><th>Status</th></tr>
+{% for a in release_allocations %}<tr><td>{{ a.line.part.sku }}</td><td>{{ a.stock.location.code }}{% if a.stock.kind == 'OVERSTOCK' %} · Replenish{% endif %}</td><td>{{ a.quantity }}</td><td>{{ a.get_state_display }}</td></tr>{% empty %}<tr><td colspan="4">No current location allocations. Historical shipments may not have location links.</td></tr>{% endfor %}</table>
+{% if selected.shipment %}<p>{{ selected.shipment.carrier }} · {{ selected.shipment.tracking }} · {{ selected.shipment.created_at }}</p>{% else %}<p>No shipment recorded. This is not proof of shipment.</p>{% endif %}
